@@ -10,12 +10,15 @@ import Login from './pages/Login'
 import ProtectedRoute from "./components/ProtectedRoute"
 import Register from "./pages/Register"
 import ClubDetails from "./pages/ClubDetails"
+import Landing from './pages/Landing'
+import Demo from './pages/Demo'
 
 function App() {
   return (
     <BrowserRouter basename="/reelspin">
       <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<Landing />} />
+        <Route path="/demo" element={<Demo />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
 
