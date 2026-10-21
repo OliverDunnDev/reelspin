@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom"
 
 function Clubs() {
   const [clubs, setClubs] = useState([])
+  const [clubDetails, setClubDetails] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
@@ -14,6 +15,51 @@ function Clubs() {
   const [createError, setCreateError] = useState("")
 
   const navigate = useNavigate()
+
+  
+async function fetchClubDetails(clubList) {
+  const entries = await Promise.all(
+    clubList.map(async (club) => {
+      let memberCount = 0
+      let currentMovie = null
+
+      try {
+        const membersResponse = await api.get(
+          `/clubs/${club.id}/members`
+        )
+        memberCount = membersResponse.data.length
+      } catch (error) {
+        console.error(
+          `Failed to fetch members for club ${club.id}:`,
+          error.response?.data || error
+        )
+      }
+
+      try {
+        const movieResponse = await api.get(
+          `/clubs/${club.id}/movies`
+        )
+        currentMovie = movieResponse.data
+      } catch (error) {
+        console.error(
+          `Failed to fetch current film for club ${club.id}:`,
+          error.response?.data || error
+        )
+      }
+
+      return [
+        club.id,
+        { memberCount, currentMovie },
+      ]
+    })
+  )
+
+  setClubDetails((currentDetails) => ({
+  ...currentDetails,
+  ...Object.fromEntries(entries),
+}))
+}
+
 
   async function handleCreateClub(event) {
     event.preventDefault()
@@ -35,6 +81,7 @@ function Clubs() {
         ...currentClubs,
         response.data,
       ])
+      await fetchClubDetails([response.data])
 
       setClubName("")
       setShowCreateModal(false)
@@ -58,6 +105,7 @@ function Clubs() {
         console.log("Clubs API response:", response.data)
 
         setClubs(response.data)
+        await fetchClubDetails(response.data)
       } catch (error) {
         console.error("Failed to fetch clubs:", error)
         setError("Unable to load your clubs.")
@@ -142,7 +190,10 @@ function Clubs() {
               </h3>
 
               <p className="mt-1 text-sm text-gray-500">
-                1 member
+                {clubDetails[club.id]?.memberCount ?? "—"}{" "}
+                {(clubDetails[club.id]?.memberCount ?? 0) === 1
+                  ? "member"
+                  : "members"}
               </p>
 
               <div className="mt-6 rounded-xl bg-gray-50 p-4">
@@ -150,9 +201,18 @@ function Clubs() {
                   Up next
                 </p>
 
+                
                 <p className="mt-1 font-semibold text-gray-800">
-                 No film selected
+                  {clubDetails[club.id]?.currentMovie?.title ||
+                    "No film selected"}
                 </p>
+
+                {clubDetails[club.id]?.currentMovie?.year && (
+                  <p className="mt-1 text-sm text-gray-500">
+                    {clubDetails[club.id].currentMovie.year}
+                  </p>
+                )}
+
               </div>
 
               <button

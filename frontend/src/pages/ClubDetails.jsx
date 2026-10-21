@@ -21,6 +21,10 @@ function ClubDetails() {
   const [watched, setWatched] = useState(false)
   const [savingRating, setSavingRating] = useState(false)
   const [ratingStats, setRatingStats] = useState(null)
+  const [backlog, setBacklog] = useState([])
+  const [backlogLoading, setBacklogLoading] = useState(true)
+  const [backlogError, setBacklogError] = useState("")
+  const [removingMovieId, setRemovingMovieId] = useState(null)
 
   async function saveRating(newRating, newWatched) {
     if (!selectedMovie) return
@@ -48,32 +52,116 @@ function ClubDetails() {
     }
   }
 
-  async function handleMovieSelect(movie) {
-    try {
-      const movieData = {
-        movie_id: movie.id,
-        title: movie.title,
-        year: movie.year,
-        rating: movie.rating,
-        genre: movie.genre,
-        poster: movie.poster,
-        overview: movie.overview,
-      }
+async function fetchBacklog() {
+  try {
+    setBacklogLoading(true)
+    setBacklogError("")
 
-      const response = await api.post(
-        `/clubs/${clubId}/movies`,
-        movieData
+    const response = await api.get(
+      `/clubs/${clubId}/backlog`
+    )
+
+    setBacklog(response.data)
+  } catch (error) {
+    console.error(
+      "Failed to fetch backlog:",
+      error.response?.data || error
+    )
+
+    setBacklogError("Unable to load the film backlog.")
+  } finally {
+    setBacklogLoading(false)
+  }
+}
+
+async function handleRemoveFromBacklog(movie) {
+  const confirmed = window.confirm(
+    `Remove "${movie.title}" from the club backlog?`
+  )
+
+  if (!confirmed) return
+
+  try {
+    setRemovingMovieId(movie.movie_id)
+    setBacklogError("")
+
+    await api.delete(
+      `/clubs/${clubId}/backlog/${movie.movie_id}`
+    )
+
+    setBacklog((currentBacklog) =>
+      currentBacklog.filter(
+        (item) => item.movie_id !== movie.movie_id
+      )
+    )
+  } catch (error) {
+    console.error(
+      "Failed to remove film from backlog:",
+      error.response?.data || error
+    )
+
+    setBacklogError(
+      error.response?.data?.detail ||
+        "Unable to remove this film from the backlog."
+    )
+  } finally {
+    setRemovingMovieId(null)
+  }
+}
+  
+async function handleMovieSelect(movie) {
+  // Confirm before replacing a different current film.
+  if (
+    selectedMovie &&
+    selectedMovie.movie_id !== movie.id
+  ) {
+    const confirmed = window.confirm(
+      `Replace "${selectedMovie.title}" with "${movie.title}"? The previous film will remain in your club's history.`
+    )
+
+    if (!confirmed) return
+  }
+
+  try {
+    const movieData = {
+      movie_id: movie.id,
+      title: movie.title,
+      year: movie.year,
+      rating: movie.rating,
+      genre: movie.genre,
+      poster: movie.poster,
+      overview: movie.overview,
+    }
+
+    const response = await api.post(
+      `/clubs/${clubId}/movies`,
+      movieData
+    )
+
+    setSelectedMovie(response.data)
+    setShowMoviePicker(false)
+
+    // Refresh history immediately after selecting a film.
+    try {
+      const historyResponse = await api.get(
+        `/clubs/${clubId}/history`
       )
 
-      setSelectedMovie(response.data)
-      setShowMoviePicker(false)
-    } catch (error) {
+      setMovieHistory(historyResponse.data)
+    } catch (historyError) {
       console.error(
-        "Failed to save movie:",
-        error.response?.data || error
+        "Failed to refresh movie history:",
+        historyError.response?.data || historyError
       )
     }
+  } catch (error) {
+    console.error(
+      "Failed to save movie:",
+      error.response?.data || error
+    )
   }
+}
+
 
   useEffect(() => {
     async function fetchClubDetails() {
@@ -138,7 +226,8 @@ try {
     }
 
     fetchClubDetails()
-  }, [clubId])
+fetchBacklog()
+}, [clubId])
 
   useEffect(() => {
   async function fetchMyRating() {
@@ -515,6 +604,109 @@ useEffect(() => {
     </div>
   )}
 </div>
+{/* Shared Film Backlog */}
+<section className="mt-12">
+  <div className="mb-5">
+    <p className="text-sm font-medium text-purple-600">
+      Up next
+    </p>
+
+    <h3 className="mt-1 text-2xl font-bold tracking-tight text-gray-900">
+      Film Backlog
+    </h3>
+
+    <p className="mt-2 text-sm text-gray-500">
+      Films your club wants to watch.
+    </p>
+  </div>
+
+  {backlogError && (
+    <p role="alert" className="mb-4 text-sm text-red-600">
+      {backlogError}
+    </p>
+  )}
+
+  {backlogLoading ? (
+    <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center">
+      <p className="text-sm text-gray-500">
+        Loading backlog...
+      </p>
+    </div>
+  ) : backlog.length === 0 ? (
+    <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center">
+      <Film size={28} className="mx-auto text-gray-400" />
+
+      <p className="mt-3 text-sm text-gray-500">
+        Your backlog is empty. Add films from Discover to get started.
+      </p>
+
+      <button
+        type="button"
+        onClick={() => navigate("/discover")}
+        className="mt-4 rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-purple-700"
+      >
+        Discover films
+      </button>
+    </div>
+  ) : (
+    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      {backlog.map((movie) => (
+        <article
+          key={movie.id}
+          className="overflow-hidden rounded-2xl border border-gray-200 bg-white"
+        >
+          {movie.poster && (
+            <div className="bg-gray-100">
+              <img
+                src={movie.poster}
+                alt={movie.title}
+                className="h-64 w-full object-contain"
+              />
+            </div>
+          )}
+
+          <div className="p-5">
+            <h4 className="font-semibold text-gray-900">
+              {movie.title}
+            </h4>
+
+            <p className="mt-2 text-sm text-gray-500">
+              {movie.year}
+              {movie.rating != null && (
+                <> · ★ {movie.rating}</>
+              )}
+            </p>
+
+            <p className="mt-3 line-clamp-3 text-sm leading-6 text-gray-600">
+              {movie.overview || "No overview available."}
+            </p>
+
+            <div className="mt-5 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => handleMovieSelect(movie)}
+                className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-purple-700"
+              >
+                Choose as current film
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleRemoveFromBacklog(movie)}
+                disabled={removingMovieId === movie.movie_id}
+                className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-600 transition hover:bg-gray-50 disabled:opacity-50"
+              >
+                {removingMovieId === movie.movie_id
+                  ? "Removing..."
+                  : "Remove from backlog"}
+              </button>
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+  )}
+</section>
       </main>
 
       {showMoviePicker && (

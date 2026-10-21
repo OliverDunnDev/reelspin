@@ -85,3 +85,23 @@ class ClubMovieRatingStats(BaseModel):
     average_rating: float | None
     rating_count: int
     watched_count: int
+
+
+class ClubBacklogMovieCreate(BaseModel):
+    movie_id: int
+    title: str
+    year: int
+    rating: float | None = None
+    genre: str | None = None
+    poster: str | None = None
+    overview: str | None = None
+
+
+class ClubBacklogMovieResponse(ClubBacklogMovieCreate):
+    id: int
+    club_id: int
+    added_by: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

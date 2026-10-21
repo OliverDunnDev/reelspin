@@ -104,3 +104,28 @@ class ClubMovieRating(Base):
     rating = Column(Float, nullable=True)
     watched = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class ClubBacklogMovie(Base):
+    __tablename__ = "club_backlog_movies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    club_id = Column(
+        Integer,
+        ForeignKey("clubs.id"),
+        nullable=False,
+    )
+
+    movie_id = Column(Integer, nullable=False)
+    title = Column(String, nullable=False)
+    year = Column(Integer, nullable=False)
+    rating = Column(Float, nullable=True)
+    genre = Column(String, nullable=True)
+    poster = Column(String, nullable=True)
+    overview = Column(String, nullable=True)
+
+    added_by = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+    created_at = Column(DateTime, default=datetime.utcnow)

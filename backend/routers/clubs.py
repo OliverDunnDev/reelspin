@@ -10,6 +10,7 @@ from models import (
     ClubMember,
     ClubMovie,
     ClubMovieRating,
+    ClubBacklogMovie,
     User,
 )
 
@@ -21,12 +22,43 @@ from schemas import (
     ClubMovieRatingResponse,
     ClubMovieRatingStats,
     ClubCreate,
+    ClubBacklogMovieCreate,
+    ClubBacklogMovieResponse,
 )
 
 import secrets
 
 
 router = APIRouter(prefix="/clubs", tags=["Clubs"])
+def get_member_club(
+    club_id: int,
+    current_user: User,
+    db: Session,
+) -> Club:
+    club = db.scalar(
+        select(Club).where(Club.id == club_id)
+    )
+
+    if club is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Club not found",
+        )
+
+    membership = db.scalar(
+        select(ClubMember).where(
+            (ClubMember.club_id == club_id)
+            & (ClubMember.user_id == current_user.id)
+        )
+    )
+
+    if membership is None:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not a member of this club",
+        )
+
+    return club
 
 
 @router.post(
@@ -66,7 +98,9 @@ def get_my_clubs(
     current_user: User = Depends(get_current_user),
 ):
     clubs = db.scalars(
-        select(Club).where(Club.owner_id == current_user.id)
+        select(Club)
+        .join(ClubMember, ClubMember.club_id == Club.id)
+        .where(ClubMember.user_id == current_user.id)
     ).all()
 
     return clubs
@@ -78,20 +112,9 @@ def get_club(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    club = db.scalar(
-        select(Club).where(
-            (Club.id == club_id)
-            & (Club.owner_id == current_user.id)
-        )
-    )
-
-    if club is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Club not found",
-        )
-
+    club = get_member_club(club_id, current_user, db)
     return club
+
 
 
 @router.post(
@@ -104,19 +127,23 @@ def select_club_movie(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    club = db.scalar(
-        select(Club).where(
-            (Club.id == club_id)
-            & (Club.owner_id == current_user.id)
+    club = get_member_club(club_id, current_user, db)
+
+    # Find the club's current film.
+    current_movie = db.scalar(
+        select(ClubMovie)
+        .where(ClubMovie.club_id == club_id)
+        .order_by(
+            ClubMovie.created_at.desc(),
+            ClubMovie.id.desc(),
         )
     )
 
-    if club is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Club not found",
-        )
+    # Avoid creating a duplicate if this film is already current.
+    if current_movie and current_movie.movie_id == movie_data.movie_id:
+        return current_movie
 
+    # Selecting a different film creates a new history entry.
     club_movie = ClubMovie(
         club_id=club_id,
         movie_id=movie_data.movie_id,
@@ -135,6 +162,7 @@ def select_club_movie(
     return club_movie
 
 
+
 @router.get(
     "/{club_id}/movies",
     response_model=ClubMovieResponse | None,
@@ -144,18 +172,7 @@ def get_club_movie(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    club = db.scalar(
-        select(Club).where(
-            (Club.id == club_id)
-            & (Club.owner_id == current_user.id)
-        )
-    )
-
-    if club is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Club not found",
-        )
+    club =     get_member_club(club_id, current_user, db)
 
     club_movie = db.scalar(
         select(ClubMovie)
@@ -175,18 +192,7 @@ def get_club_history(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    club = db.scalar(
-        select(Club).where(
-            (Club.id == club_id)
-            & (Club.owner_id == current_user.id)
-        )
-    )
-
-    if club is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Club not found",
-        )
+    club =  get_member_club(club_id, current_user, db)
 
     history = db.scalars(
         select(ClubMovie)
@@ -520,3 +526,95 @@ def get_movie_rating_stats(
         "rating_count": len(rated_values),
         "watched_count": watched_count,
     }
+
+
+@router.get(
+    "/{club_id}/backlog",
+    response_model=list[ClubBacklogMovieResponse],
+)
+def get_club_backlog(
+    club_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    get_member_club(club_id, current_user, db)
+
+    return db.scalars(
+        select(ClubBacklogMovie)
+        .where(ClubBacklogMovie.club_id == club_id)
+        .order_by(ClubBacklogMovie.created_at.desc())
+    ).all()
+
+
+@router.post(
+    "/{club_id}/backlog",
+    response_model=ClubBacklogMovieResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_club_backlog_movie(
+    club_id: int,
+    movie_data: ClubBacklogMovieCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    get_member_club(club_id, current_user, db)
+
+    existing_movie = db.scalar(
+        select(ClubBacklogMovie).where(
+            ClubBacklogMovie.club_id == club_id,
+            ClubBacklogMovie.movie_id == movie_data.movie_id,
+        )
+    )
+
+    if existing_movie:
+        raise HTTPException(
+            status_code=409,
+            detail="This film is already in the club backlog",
+        )
+
+    backlog_movie = ClubBacklogMovie(
+        club_id=club_id,
+        movie_id=movie_data.movie_id,
+        title=movie_data.title,
+        year=movie_data.year,
+        rating=movie_data.rating,
+        genre=movie_data.genre,
+        poster=movie_data.poster,
+        overview=movie_data.overview,
+        added_by=current_user.id,
+    )
+
+    db.add(backlog_movie)
+    db.commit()
+    db.refresh(backlog_movie)
+
+    return backlog_movie
+
+
+@router.delete("/{club_id}/backlog/{movie_id}")
+def remove_club_backlog_movie(
+    club_id: int,
+    movie_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    get_member_club(club_id, current_user, db)
+
+    backlog_movie = db.scalar(
+        select(ClubBacklogMovie).where(
+            ClubBacklogMovie.club_id == club_id,
+            ClubBacklogMovie.movie_id == movie_id,
+        )
+    )
+
+    if backlog_movie is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Film not found in the club backlog",
+        )
+
+    db.delete(backlog_movie)
+    db.commit()
+
+    return {"message": "Film removed from backlog"}
+
